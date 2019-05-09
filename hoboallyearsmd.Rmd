@@ -1,0 +1,247 @@
+---
+title: "Juan Carlos Abiotic Data for Prather et al 2019"
+author: "Matthew Chmielewski"
+date: "May 8, 2019"
+output:
+  pdf_document: default
+  html_document: default
+editor_options:
+  chunk_output_type: console
+---
+
+Load data and libraries
+```{r}
+hoboallyears<-read.csv("JC_Hobo_Master.csv")
+library(lubridate)
+library(ggplot2)
+library(tidyverse)
+library(plyr)
+library(ggridges)
+```
+
+Check for NA values, create time and date variables
+```{r}
+
+head(hoboallyears)
+length(hoboallyears$Date.Time)
+#drop na values
+hoboallyearsa<-na.omit(hoboallyears)
+length(hoboallyears$Date.Time)
+#looks like there were no NA values
+#create wanted time variables via lubridate
+hoboallyearsa$day<-day(mdy_hm(hoboallyearsa$Date.Time))
+hoboallyearsa$month<-month(mdy_hm(hoboallyearsa$Date.Time), label = TRUE)
+hoboallyearsa$year<-year(mdy_hm(hoboallyearsa$Date.Time))
+hoboallyearsa$date<-as.character(paste(hoboallyearsa$month, hoboallyearsa$day, sep = ""))
+hoboallyearsa$time<-paste(c(hour(mdy_hm(hoboallyearsa$Date.Time))), minute(mdy_hm(hoboallyearsa$Date.Time)), sep=":")
+hoboallyearsa$julian<-yday(date(mdy_hm(hoboallyearsa$Date.Time)))
+hoboallyearsa$monthyear<-as.factor(paste(hoboallyearsa$month, hoboallyearsa$year, sep = "."))
+```
+
+The 2013 data came in two formats that are in a different (dmy) order
+We can split data into already usable data as well as the two sections that need to be fixed, process the 2013 data via lubridate, then add it back
+to the rest of the dataset
+```{r}
+american2013<-subset(hoboallyearsa, date == "NANA")
+chilean2013<-subset(hoboallyearsa, year == "2013")
+restofdata<-subset(hoboallyearsa, year != "2013" & date != "NANA")
+length(american2013[,1])+length(chilean2013[,1])+length(restofdata[,1])
+head(american2013)
+
+#convert chilean (dmy) dates
+chilean2013$day<-day(dmy_hm(chilean2013$Date.Time))
+chilean2013$month<-month(dmy_hm(chilean2013$Date.Time), label = TRUE)
+chilean2013$year<-year(dmy_hm(chilean2013$Date.Time))
+chilean2013$date<-as.character(paste(chilean2013$month, chilean2013$day, sep = ""))
+chilean2013$time<-paste(c(hour(dmy_hm(chilean2013$Date.Time))), minute(dmy_hm(chilean2013$Date.Time)), sep=":")
+chilean2013$julian<-yday(date(dmy_hm(chilean2013$Date.Time)))
+chilean2013$monthyear<-as.factor(paste(chilean2013$month, chilean2013$year, sep = "."))
+
+#should be able to process via lubridate now
+american2013$day<-day(mdy_hms(american2013$Date.Time))
+american2013$month<-month(mdy_hms(american2013$Date.Time), label = TRUE)
+american2013$year<-year(mdy_hms(american2013$Date.Time))
+american2013$date<-as.character(paste(american2013$month, american2013$day, sep = ""))
+american2013$time<-paste(c(hour(mdy_hms(american2013$Date.Time))), minute(mdy_hms(american2013$Date.Time)), sep=":")
+american2013$julian<-yday(date(mdy_hms(american2013$Date.Time)))
+american2013$monthyear<-as.factor(paste(american2013$month, american2013$year, sep = "."))
+
+
+#now need to stitch together "american2013", "chilean2013", and "restofdata"
+
+hobosfullset<-full_join(restofdata, chilean2013)
+hobosfullset<-full_join(hobosfullset, american2013)
+length(hobosfullset)
+```
+
+In order to properly process the dataset we have to convert some columns to factors and properly temporally order monthyear
+```{r}
+levels(hobosfullset$monthyear)
+
+#yearmonth is not a factor, need to coerce it into factor format
+hobosfullset$monthyear<-as.factor(hobosfullset$monthyear)
+levels(hobosfullset$monthyear)
+
+#now monthyear is a factor but levels are not in temporal order, need to put them in order
+
+hobosfullset$monthyear<-factor(hobosfullset$monthyear, levels = c("Jan.2013", "Feb.2013", "Mar.2013", "Apr.2013", "May.2013", "Jun.2013", "Jul.2013", "Jan.2014", "Feb.2014", "Mar.2014", "Apr.2014", "May.2014", "Feb.2015", "Mar.2015", 
+                                                                   "Apr.2015", "May.2015", "Jun.2015", "Jul.2015", "Aug.2015", "Sep.2015", "Oct.2015", "Nov.2015", "Dec.2015", "Jan.2016", "Feb.2016")) 
+
+levels(hobosfullset$monthyear)
+
+#hobosfullset$monthyear, gsub(":[[:digit:]]+", "", hobosfullset$time)
+
+#now in order!
+```
+
+Now we can summarise data properly
+```{r}
+#summarise by month
+sumjchobos<- ddply(hobosfullset, c("monthyear","Treatment"), summarise,
+                         NTemp  = length(Temp),
+                         meanTemp = mean(Temp),
+                         sdTemp   = sd(Temp),
+                         seTemp = sdTemp / sqrt(NTemp),
+                         min = min(Temp),
+                         max = max(Temp),
+                        
+                        NRH  = length(RH),
+                        meanRH = mean(RH),
+                        sdRH   = sd(RH),
+                        seRH = sdRH / sqrt(NRH),
+                        min = min(RH),
+                        max = max(RH)
+                        
+                       
+)
+sumjchobos$CITemp<-sumjchobos$seTemp*1.96
+sumjchobos$CIRH<-sumjchobos$seRH*1.96
+
+head(sumjchobos)
+
+write.csv(sumjchobos, "sumjchobos.csv")
+```
+
+Now we can plot abiotic data by the timeframe we are interested in
+```{r}
+#plotting humidity
+hoboshumidity<-ggplot(data = hobosfullset, aes(monthyear, RH, fill = Treatment))+
+  geom_boxplot() + 
+  ggtitle("Humidity")+
+theme(#axis.title.x = element_blank(),
+  #axis.title.y = element_blank(),
+  axis.text.x  = element_text(angle = 90, vjust=1, size=12),
+  panel.grid.minor.x=element_blank(),
+  panel.grid.major.x=element_blank(),
+  panel.grid.minor.y=element_blank(),
+  panel.grid.major.y=element_blank())
+  
+hoboshumidity  
+
+hobostemp<-ggplot(data = hobosfullset, aes(monthyear, Temp, fill = Treatment))+
+  geom_boxplot()+  
+  ggtitle("Temp")+
+  theme(#axis.title.x = element_blank(),
+    #axis.title.y = element_blank(),
+    axis.text.x  = element_text(angle = 90, vjust=1, size=12),
+    panel.grid.minor.x=element_blank(),
+    panel.grid.major.x=element_blank(),
+    panel.grid.minor.y=element_blank(),
+    panel.grid.major.y=element_blank())
+
+hobostemp 
+
+pdf(file="hoboshumidity.pdf", width = 12, height = 11, family = "Helvetica")
+hoboshumidity
+dev.off()
+
+pdf(file="hobostemp.pdf",width=12, height=11, family = "Helvetica")
+hobostemp
+dev.off()
+
+```
+
+Ridgeplots of temp and temperature differential
+```{r}
+
+hobostempridges<-ggplot(data = subset(hobosfullset, year != "2013"), aes(x=Temp, y=monthyear, fill=Treatment))+
+  geom_density_ridges(scale=4)
+
+hobostempridges
+
+pdf(file="hobostempridges.pdf", width =12, height=11, family = "Helvetica")
+hobostempridges
+dev.off()
+
+#what about a ridgeplot of difference values (OTC-CON across time, positive values indicate heating, negative indicate cooler than control)
+#minutes and seconds might be off, but should be able to do this by hour of the day 
+
+differentialdata<-hobosfullset
+differentialdata$hour<-gsub(":[[:digit:]]+", "", differentialdata$time)
+differentialdata$hour
+
+differentialdata<-unite(differentialdata, datehour, monthyear, hour, remove=FALSE)
+head(differentialdata)
+
+differentialdata1<-subset(differentialdata, year != "2013")
+
+
+
+
+sumdifferential<- ddply(differentialdata1, c("datehour","Treatment"), summarise,
+                   NTemp  = length(Temp),
+                   meanTemp = mean(Temp),
+                   sdTemp   = sd(Temp),
+                   seTemp = sdTemp / sqrt(NTemp),
+                   min = min(Temp),
+                   max = max(Temp),
+                   
+                   NRH  = length(RH),
+                   meanRH = mean(RH),
+                   sdRH   = sd(RH),
+                   seRH = sdRH / sqrt(NRH),
+                   min = min(RH),
+                   max = max(RH)
+                   
+                   
+)
+
+head(sumdifferential)
+
+diffhours<-unique(sumdifferential$datehour)
+diffmonths<-gsub("_[[:digit:]]+", "", diffhours)
+diffmonths
+
+cont<-grep("CON", sumdifferential$Treatment)
+otc<-grep("OTC", sumdifferential$Treatment)
+
+difftemps<-sumdifferential$meanTemp[otc]-sumdifferential$meanTemp[cont]
+differentials<-data.frame(diffhours, difftemps, diffmonths)
+
+differentials$diffmonths<-factor(differentials$diffmonths, levels = c("Jan.2014", "Feb.2014", "Mar.2014", "Apr.2014", "May.2014", "Feb.2015", "Mar.2015", 
+                                                                  "Apr.2015", "May.2015", "Jun.2015", "Jul.2015", "Aug.2015", "Sep.2015", "Oct.2015", "Nov.2015", "Dec.2015", "Jan.2016", "Feb.2016")) 
+
+
+
+hobosdiffridges<-ggplot(data = differentials, aes(x=difftemps, y=diffmonths))+
+  geom_density_ridges(scale=4)+
+  geom_vline(xintercept = 0, size= 1, linetype= 2)+
+  theme_bw()+
+  theme(panel.grid.minor.y=element_blank(),
+           panel.grid.major.y=element_blank(),
+        panel.grid.minor.x=element_blank(),
+        panel.grid.major.x=element_blank())+
+  xlab("Temperature Differential")+
+  ylab("")
+  
+
+hobosdiffridges
+
+pdf(file="hobosdiffridges.pdf", width =12, height=11, family = "Helvetica")
+hobosdiffridges
+dev.off()
+
+png(file="hobosdiffridgespnd.png", width=1150, height=1150, res=150)
+hobosdiffridges
+dev.off()
+```
